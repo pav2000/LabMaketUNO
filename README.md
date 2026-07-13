@@ -5,4 +5,4 @@
 Разводка платы, возможно, требует корректировки, для увеличения ее функционала.<br>
 <br>
 Внешний вид платы ver 1.2:<br>
-<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/view01.png" width="480" /> <br>
+<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/view1.png" width="480" /> <br>
