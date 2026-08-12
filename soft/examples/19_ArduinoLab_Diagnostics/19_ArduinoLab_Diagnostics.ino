@@ -21,8 +21,11 @@
   TFT1 ST7789 1.3"        — экран, SPI через TXS0108 (5В -> 3.3В); собственный
                              минимальный драйвер (см. ниже) — без Adafruit_GFX/
                              ST7789/BusIO
-  U7   GY-273 HMC5883L    — 3-осевой компас, I2C 0x1E
+  U7   GY-273 HMC5883L    — 3-осевой компас, I2C 0x1E (или 0x0D, если реально
+                             стоит клон QMC5883L — определяется автоматически,
+                             драйвер написан на прямых регистрах, без библиотек)
   U14  DS3232MZ+TRL       — часы реального времени (RTC), I2C 0x68, батарея BT1
+                             (тоже прямые регистры, без библиотеки)
   U13  CAT24C32WI-G       — EEPROM 32Кбит, I2C (адрес зависит от A0..A2, обычно 0x50)
   U11  DHT11              — датчик температуры/влажности, пин D4
   U10  LM35DZ             — аналоговый датчик температуры, пин A2
@@ -42,44 +45,23 @@
                              Adafruit_BusIO)
 
   Тесты компаса, DHT11, LM35 и фоторезистора работают в режиме "живого"
-  просмотра: значения обновляются раз в 2 секунды, выход в меню — по любой
+  просмотра: значения обновляются раз в 1 секунду, выход в меню — по любой
   кнопке (не дожидаясь окончания цикла).
 
   Экран переведён на собственный минимальный SPI-драйвер (без Adafruit_GFX/
-  ST7789/BusIO). Путь до рабочей комбинации был не совсем прямым — коротко,
-  для истории и на случай переноса на другую партию модулей:
-    1) Первая попытка (SPI_MODE0, без офсета) была полностью тёмной.
-    2) Сравнение с рабочим кодом на Adafruit_ST7789 показало: экрану нужен
-       SPI_MODE3 (не MODE0) — это буквально подтверждено комментарием в
-       исходниках Adafruit ("certain display needs MODE3 instead").
-    3) У Adafruit_ST7789 контроллер физически адресует GRAM 240x320, хотя
-       видна только матрица 240x240 — нужно смещение в CASET/RASET. Для
-       rotation=1 (как в рабочем примере пользователя) это смещение +80
-       идёт по оси X, а MADCTL = 0xA0 (биты MY|MV) — не 0x00 и не 0xC0,
-       как можно было бы предположить для rotation=0.
-    4) Даже с правильными MODE3+MADCTL+офсетом одна попытка инициализации
-       сразу после подачи питания оказалась НЕНАДЁЖНОЙ (иногда экран
-       оставался тёмным). Экспериментально подтверждено: повтор полной
-       последовательности инициализации дважды подряд решает эту проблему
-       полностью и стабильно (проверено несколькими циклами полного
-       отключения/включения питания).
-  Все четыре пункта учтены в классе MiniTFT ниже.
-
+  ST7789/BusIO). 
   ------------------------- НУЖНЫЕ БИБЛИОТЕКИ ------------------------------
   (Скетч -> Подключить библиотеку -> Управлять библиотеками)
-    - DS3231 (NorthernWidget)                — вместо RTClib
-    - DFRobot_QMC5883                          — вместо ручных регистров HMC5883L
     - DHT11 (Dhruba Saha, dhrubasaha08/DHT11)  — вместо Adafruit DHT sensor library
     - VL53L0X (Pololu, pololu/vl53l0x-arduino) — вместо Adafruit_VL53L0X
   Wire, SPI, SoftwareSerial — входят в состав Arduino IDE.
-  Adafruit_GFX, Adafruit_ST7789, Adafruit_BusIO, Adafruit_VL53L0X — НЕ
-  используются, исключены из проекта для экономии флеш/RAM.
+  Adafruit_GFX, Adafruit_ST7789, Adafruit_BusIO, Adafruit_VL53L0X, DS3231
+  (NorthernWidget), DFRobot_QMC5883 — НЕ используются, исключены из проекта
+  для экономии флеш/RAM. Компас (HMC5883L/QMC5883L) и часы (DS3232) работают
+  напрямую через регистры по I2C (см. compassBegin()/compassRead() и
+  ds3232ReadTime() ниже) — без сторонних библиотек вообще.
 
   --------------------------- ВАЖНЫЕ ДОПУЩЕНИЯ ------------------------------
-  На схеме сигналы RES/DC экрана и адрес EEPROM НЕ подписаны конкретными
-  номерами пинов Arduino (видны только имена цепей). Ниже взяты свободные
-  пины по остаточному принципу — ОБЯЗАТЕЛЬНО сверьте с вашей платой и
-  поправьте в блоке "PIN CONFIG" при необходимости:
     TFT_RST = 10, TFT_DC = 9, CS — не подключен (модуль сажает его на GND,
     свой драйвер этот пин вообще не использует). Подсветка (BLK) всегда
     включена аппаратно и кодом не управляется.
@@ -99,8 +81,6 @@
 
 #include <SPI.h>
 #include <Wire.h>
-#include <DS3231.h>
-#include <DFRobot_QMC5883.h>
 #include <DHT11.h>
 #include <VL53L0X.h>
 #include <SoftwareSerial.h>
@@ -133,6 +113,7 @@
 #define HC12_MODE_AT     LOW   // SET = 0: режим AT-команд (настройка модуля)
 
 #define I2C_ADDR_HMC5883L 0x1E
+#define I2C_ADDR_QMC5883L 0x0D   // многие модули GY-273 на деле содержат клон QMC5883L
 #define I2C_ADDR_DS3232   0x68
 #define I2C_ADDR_EEPROM   0x50   // адрес по умолчанию, если A0..A2 EEPROM на GND
 
@@ -222,7 +203,7 @@ public:
     pinMode(TFT_DC, OUTPUT);
     pinMode(TFT_RST, OUTPUT);
 
-    delay(500); // стабилизация питания после старта — критично для этой платы
+ //   delay(200); // стабилизация питания после старта — критично для этой платы
 
     SPI.begin();
     SPI.beginTransaction(SPISettings(TFT_SPI_SPEED_HZ, MSBFIRST, TFT_SPI_MODE));
@@ -230,7 +211,7 @@ public:
     // Инициализация выполняется дважды — экспериментально подтверждено,
     // что одного прохода сразу после включения питания недостаточно.
     initSequence();
-    initSequence();
+  //  initSequence();
   }
 
   void setRotation(uint8_t) { /* поддерживается только найденная рабочая ориентация */ }
@@ -357,8 +338,6 @@ private:
 
 // ============================== ОБЪЕКТЫ ====================================
 MiniTFT tft;                     // свой драйвер ST7789 (без Adafruit_GFX/BusIO)
-DS3231 rtcClock;                 // библиотека DS3231 (NorthernWidget), совместима с DS3232
-DFRobot_QMC5883 compass;         // библиотека DFRobot_QMC5883 (поддерживает и HMC5883L, и QMC5883L)
 DHT11 dhtSensor(PIN_DHT);        // библиотека DHT11 (Dhruba Saha) — пин задаётся в конструкторе
 VL53L0X distanceSensor;          // библиотека Pololu VL53L0X (без Adafruit_BusIO)
 SoftwareSerial hc12(HC12_ARDUINO_RX, HC12_ARDUINO_TX);
@@ -370,9 +349,6 @@ SoftwareSerial hc12(HC12_ARDUINO_RX, HC12_ARDUINO_TX);
 typedef void (*TestFunc)();
 
 // Явные прототипы тестовых функций — обязательны для массива указателей ниже.
-// Автогенерация прототипов Arduino IDE не всегда справляется с функциями,
-// используемыми как указатели в инициализаторе массива, поэтому объявляем
-// их здесь вручную (сами функции определены дальше по файлу).
 void testTFT();
 void testCompassHMC5883L();
 void testRTC_DS3232();
@@ -386,25 +362,31 @@ void testDistanceVL53L0X();
 void testBuzzer();
 void testHC12();
 
+// Прототип нужен, т.к. printExitHint() (определена ниже) вызывает printLine(),
+// а printLine() определена значительно дальше по файлу — эта среда сборки
+// не генерирует прототипы автоматически.
+void printLine(int y, const String &s, uint16_t color = COL_TEXT, uint8_t size = 2);
+
+// Прототип нужен по той же причине: setup() вызывает splash(), а splash()
+// определена значительно дальше по файлу.
+void splash();
+
 struct MenuItem {
   const char* name; // указатель на строку в PROGMEM (см. MENU_NAME_* ниже)
   TestFunc func;
 };
 
-// Названия пунктов меню — во флеш-памяти (PROGMEM). Объявлены отдельными
-// константами, а не через F(), потому что F()/PSTR() использует GCC
-// statement-expression, а он запрещён в инициализаторе ГЛОБАЛЬНОГО массива
-// (разрешён только внутри тела функций) — именно это и даёт ошибку компиляции.
+// Названия пунктов меню — во флеш-памяти (PROGMEM)
 const char MENU_NAME_1[]  PROGMEM = "1  TFT ST7789";
-const char MENU_NAME_2[]  PROGMEM = "2  Kompas HMC5883L";
+const char MENU_NAME_2[]  PROGMEM = "2  Compass HMC5883L";
 const char MENU_NAME_3[]  PROGMEM = "3  RTC DS3232";
 const char MENU_NAME_4[]  PROGMEM = "4  EEPROM AT24C32";
 const char MENU_NAME_5[]  PROGMEM = "5  DHT11";
 const char MENU_NAME_6[]  PROGMEM = "6  LM35 (temp.)";
-const char MENU_NAME_7[]  PROGMEM = "7  Fotorezistor LDR";
-const char MENU_NAME_8[]  PROGMEM = "8  Zapasnoy vkhod A0";
-const char MENU_NAME_9[]  PROGMEM = "9  Knopki D2/D3";
-const char MENU_NAME_10[] PROGMEM = "10 Dalnomer VL53L0X";
+const char MENU_NAME_7[]  PROGMEM = "7  Photoresistor LDR";
+const char MENU_NAME_8[]  PROGMEM = "8  Variable Resistor";
+const char MENU_NAME_9[]  PROGMEM = "9  Buttons D2/D3";
+const char MENU_NAME_10[] PROGMEM = "10 Distance VL53L0X";
 const char MENU_NAME_11[] PROGMEM = "11 Buzzer";
 const char MENU_NAME_12[] PROGMEM = "12 HC-12 (radio)";
 
@@ -418,7 +400,7 @@ MenuItem menuItems[] = {
   {MENU_NAME_7,  testLDR},
   {MENU_NAME_8,  testSpareA0},
   {MENU_NAME_9,  testDigitalButtons},
-  {MENU_NAME_10, testDigitalButtons},//testDistanceVL53L0X},
+  {MENU_NAME_10, testDistanceVL53L0X},
   {MENU_NAME_11, testBuzzer},
   {MENU_NAME_12, testHC12},
 };
@@ -427,8 +409,7 @@ const int NUM_MENU_ITEMS = sizeof(menuItems) / sizeof(menuItems[0]);
 int menuSelected = 0;
 
 // Пороговые значения ADC для лесенки кнопок A3 — присланы пользователем по
-// результатам реального тестирования платы (заменяют более ранние
-// теоретические расчёты, которые давали неверную классификацию нажатий).
+// результатам реального тестирования платы 
 enum LadderBtn { LB_NONE, LB_DOWN, LB_OK, LB_UP };
 
 LadderBtn readLadderRaw() {
@@ -475,6 +456,17 @@ bool liveWait(unsigned long ms) {
   return false;
 }
 
+// "Живые" тесты (с автообновлением) сами ждут нажатие кнопки, чтобы выйти —
+// одного нажатия достаточно. Чтобы runSelectedTest() не требовал ВТОРОЕ
+// нажатие для возврата в меню, тест перед выходом ставит этот флаг.
+bool skipReturnWait = false;
+
+// Печатает один раз (не в цикле обновления) подсказку внизу экрана для
+// "живых" тестов — сразу видно, как выйти.
+void printExitHint() {
+  printLine(207, F("Any button = exit"), COL_GREY, 1);
+}
+
 // Y-координата строки пункта меню номер i (используется и полной, и
 // точечной перерисовкой, чтобы координаты никогда не разъезжались).
 const int MENU_ITEM_Y0 = 30;
@@ -505,7 +497,7 @@ void drawMenuFull() {
   tft.setTextColor(COL_TITLE);
   tft.setTextSize(2);
   tft.setCursor(6, 4);
-  tft.println(F("MENU testov"));
+  tft.println(F("TEST MENU"));
   tft.drawFastHLine(0, 24, 240, COL_GREY);
 
   for (int i = 0; i < NUM_MENU_ITEMS; i++) {
@@ -517,18 +509,24 @@ void drawMenuFull() {
   tft.setTextColor(COL_WARN);
   tft.setTextSize(1);
   tft.setCursor(4, y + 8);
-  tft.println(F("UP/DOWN - vybor, OK - start"));
+  tft.println(F("UP/DOWN - select, OK - start"));
 }
 
 void runSelectedTest() {
   menuItems[menuSelected].func();
+
+  if (skipReturnWait) {
+    // "живой" тест уже вышел по одному нажатию — второе не требуется
+    skipReturnWait = false;
+    return;
+  }
 
   // футер-подсказка и ожидание возврата в меню (по нажатию любой кнопки)
   tft.fillRect(0, 220, 240, 20, COL_BG);
   tft.setTextColor(COL_GREY);
   tft.setTextSize(1);
   tft.setCursor(6, 224);
-  tft.println(F("Lyubaya knopka - v menu"));
+  tft.println(F("Any button - menu"));
   waitLadderPress();
 }
 
@@ -536,7 +534,7 @@ void runSelectedTest() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println(F("=== ArduinoLab: диагностика запущена ==="));
+  Serial.println(F("=== ArduinoLab: diagnostics started ==="));
 
   pinMode(PIN_BTN_D2, INPUT_PULLUP);
   pinMode(PIN_BTN_D3, INPUT_PULLUP);
@@ -557,7 +555,6 @@ void setup() {
 }
 
 // ============================== LOOP =======================================
-// Циклической автопроверки больше нет — только меню с ручным выбором теста.
 // Полная перерисовка — только при входе в меню; Up/Down точечно обновляют
 // только две затронутые строки (старый и новый выбранный пункт).
 void loop() {
@@ -631,8 +628,8 @@ int freeRam() {
 // Человекочитаемое имя устройства по известному адресу I2C на этой плате.
 String i2cDeviceName(byte addr) {
   switch (addr) {
-    case I2C_ADDR_HMC5883L: return F("HMC5883L (kompas)");
-    case 0x29:              return F("VL53L0X (dalnomer)");
+    case I2C_ADDR_HMC5883L: return F("HMC5883L (compass)");
+    case 0x29:              return F("VL53L0X (distance)");
     case I2C_ADDR_EEPROM:   return F("AT24C32 (EEPROM)");
     case I2C_ADDR_DS3232:   return F("DS3232 (RTC)");
     default:                return F("");
@@ -652,18 +649,18 @@ void splash() {
   tft.setTextSize(1);
   tft.setTextColor(COL_TEXT);
   tft.setCursor(6, 32);
-  tft.print(F("Proshivka: "));
+  tft.print(F("Firmware: "));
   tft.println(F(FW_VERSION));
 
   tft.setCursor(6, 44);
-  tft.print(F("Svobodno RAM: "));
+  tft.print(F("Free RAM: "));
   tft.print(freeRam());
-  tft.println(F(" bayt"));
+  tft.println(F(" bytes"));
 
   tft.drawFastHLine(0, 56, 240, COL_GREY);
   tft.setTextColor(COL_WARN);
   tft.setCursor(6, 62);
-  tft.println(F("Skanirovanie shiny I2C:"));
+  tft.println(F("Scanning I2C bus:"));
 
   Serial.println(F("--- I2C scan ---"));
   int y = 74;
@@ -673,7 +670,7 @@ void splash() {
     if (Wire.endTransmission() == 0) {
       String nm = i2cDeviceName(addr);
 
-      Serial.print(F("  Найдено устройство 0x"));
+      Serial.print(F("  Found device 0x"));
       if (addr < 16) Serial.print('0');
       Serial.print(addr, HEX);
       if (nm.length()) { Serial.print(F("  ")); Serial.print(nm); }
@@ -697,17 +694,17 @@ void splash() {
   if (count == 0) {
     tft.setTextColor(COL_FAIL);
     tft.setCursor(6, y);
-    tft.println(F("Ustroystva ne naideny!"));
+    tft.println(F("No devices found!"));
     y += 10;
   }
 
   tft.drawFastHLine(0, y + 3, 240, COL_GREY);
   tft.setTextColor(COL_TEXT);
   tft.setCursor(6, y + 9);
-  tft.print(F("Vsego naideno: "));
+  tft.print(F("Total found: "));
   tft.println(count);
 
-  Serial.print(F("Всего устройств I2C: "));
+  Serial.print(F("Total I2C devices: "));
   Serial.println(count);
   Serial.println(F("----------------"));
 
@@ -729,66 +726,118 @@ void testTFT() {
   statusBadge(true, 40);
   printLine(80, F("Init: OK"), COL_TEXT);
   printLine(105, F("240x240, SPI"), COL_TEXT);
-  printLine(130, F("BLK: vsegda vkl."), COL_TEXT);
-  logResult(F("TFT ST7789"), true, F("инициализация и вывод прошли успешно (подсветка не управляется кодом)"));
+  printLine(130, F("Backlight: always on"), COL_TEXT);
+  logResult(F("TFT ST7789"), true, F("init and draw completed successfully (backlight not software-controlled)"));
   delay(1200);
 }
 
-// ======================= ТЕСТ КОМПАСА (DFRobot_QMC5883) ========================
+// ======================= ТЕСТ КОМПАСА (регистры напрямую) ========================
 bool i2cPresent(byte addr) {
   Wire.beginTransmission(addr);
   return (Wire.endTransmission() == 0);
 }
 
+bool i2cWriteReg(byte addr, byte reg, byte val) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(val);
+  return (Wire.endTransmission() == 0);
+}
+
+// Определяем реальный чип на плате: многие модули GY-273, подписанные как
+// HMC5883L, на деле содержат клон QMC5883L — у него ДРУГОЙ адрес I2C (0x0D)
+// и другая раскладка регистров/данных, поэтому поддерживаем оба варианта.
+enum CompassChip { COMPASS_NONE, COMPASS_HMC5883L, COMPASS_QMC5883L };
+CompassChip compassChip = COMPASS_NONE;
+
+bool compassBegin() {
+  if (i2cPresent(I2C_ADDR_HMC5883L)) {
+    i2cWriteReg(I2C_ADDR_HMC5883L, 0x00, 0x70); // Config A: 8 усреднений, 15Hz
+    i2cWriteReg(I2C_ADDR_HMC5883L, 0x01, 0xA0); // Config B: усиление
+    i2cWriteReg(I2C_ADDR_HMC5883L, 0x02, 0x00); // Mode: непрерывный режим
+    compassChip = COMPASS_HMC5883L;
+    return true;
+  }
+  if (i2cPresent(I2C_ADDR_QMC5883L)) {
+    i2cWriteReg(I2C_ADDR_QMC5883L, 0x0B, 0x01); // SET/RESET period (обязательно)
+    i2cWriteReg(I2C_ADDR_QMC5883L, 0x09, 0x1D); // OSR=512,RNG=8G,ODR=200Hz,continuous
+    compassChip = COMPASS_QMC5883L;
+    return true;
+  }
+  compassChip = COMPASS_NONE;
+  return false;
+}
+
+// Порядок байт данных в регистрах разный у чипов: HMC5883L отдаёт X,Z,Y
+// (старший байт первым), QMC5883L — X,Y,Z (младший байт первым).
+bool compassRead(int16_t &x, int16_t &y, int16_t &z) {
+  if (compassChip == COMPASS_HMC5883L) {
+    Wire.beginTransmission(I2C_ADDR_HMC5883L);
+    Wire.write(0x03);
+    if (Wire.endTransmission() != 0) return false;
+    Wire.requestFrom((int)I2C_ADDR_HMC5883L, 6);
+    if (Wire.available() < 6) return false;
+    x = (int16_t)((Wire.read() << 8) | Wire.read());
+    z = (int16_t)((Wire.read() << 8) | Wire.read());
+    y = (int16_t)((Wire.read() << 8) | Wire.read());
+    return true;
+  }
+  if (compassChip == COMPASS_QMC5883L) {
+    Wire.beginTransmission(I2C_ADDR_QMC5883L);
+    Wire.write(0x00);
+    if (Wire.endTransmission() != 0) return false;
+    Wire.requestFrom((int)I2C_ADDR_QMC5883L, 6);
+    if (Wire.available() < 6) return false;
+    x = (int16_t)(Wire.read() | (Wire.read() << 8));
+    y = (int16_t)(Wire.read() | (Wire.read() << 8));
+    z = (int16_t)(Wire.read() | (Wire.read() << 8));
+    return true;
+  }
+  return false;
+}
+
 void testCompassHMC5883L() {
-  screenHeader(F("2. Kompas HMC5883L"));
+  screenHeader(F("2. Compass HMC5883L"));
 
   static bool inited = false;
   static bool initOk = false;
   if (!inited) {
-    initOk = compass.begin();
-    if (initOk) {
-      // библиотека сама определяет реальный чип (HMC5883L или QMC5883L)
-      if (compass.isHMC()) {
-        compass.setRange(HMC5883L_RANGE_1_3GA);
-        compass.setMeasurementMode(HMC5883L_CONTINOUS);
-        compass.setDataRate(HMC5883L_DATARATE_15HZ);
-        compass.setSamples(HMC5883L_SAMPLES_8);
-      } else if (compass.isQMC()) {
-        compass.setRange(QMC5883_RANGE_2GA);
-        compass.setMeasurementMode(QMC5883_CONTINOUS);
-        compass.setDataRate(QMC5883_DATARATE_50HZ);
-        compass.setSamples(QMC5883_SAMPLES_8);
-      }
-    }
+    initOk = compassBegin();
     inited = true;
   }
 
   if (!initOk) {
     statusBadge(false, 40);
-    printLine(80, F("I2C 0x1E ne otvechaet"), COL_FAIL);
-    logResult(F("HMC5883L/QMC5883"), false, F("устройство не обнаружено на шине I2C (DFRobot_QMC5883.begin() FAIL)"));
+    printLine(80, F("I2C 0x1E/0x0D no reply"), COL_FAIL);
+    logResult(F("HMC5883L/QMC5883"), false, F("device not found on I2C bus (neither 0x1E nor 0x0D)"));
     delay(1500);
     return;
   }
 
+  printExitHint();
   waitLadderRelease();
   while (true) {
-    Vector mag = compass.readRaw();
+    int16_t x, y, z;
+    bool ok = compassRead(x, y, z);
 
-    statusBadge(true, 40);
-    printLine(80, String(F("X: ")) + String((int)mag.XAxis), COL_TEXT);
-    printLine(105, String(F("Y: ")) + String((int)mag.YAxis), COL_TEXT);
-    printLine(130, String(F("Z: ")) + String((int)mag.ZAxis), COL_TEXT);
-    float heading = atan2((float)mag.YAxis, (float)mag.XAxis) * 180.0 / PI;
-    if (heading < 0) heading += 360.0;
-    printLine(160, String(F("Azimut: ")) + String(heading, 1) + F(" deg"), COL_WARN);
-    printLine(190, compass.isHMC() ? F("Chip: HMC5883L") : F("Chip: QMC5883L"), COL_TEXT, 1);
-    logResult(F("HMC5883L/QMC5883"), true,
-              String(F("X=")) + String((int)mag.XAxis) + F(" Y=") + String((int)mag.YAxis) +
-              F(" Z=") + String((int)mag.ZAxis) + F(" azimut=") + String(heading, 1));
+    statusBadge(ok, 40);
+    if (ok) {
+      printLine(80, String(F("X: ")) + String((int)x), COL_TEXT);
+      printLine(105, String(F("Y: ")) + String((int)y), COL_TEXT);
+      printLine(130, String(F("Z: ")) + String((int)z), COL_TEXT);
+      float heading = atan2((float)y, (float)x) * 180.0 / PI;
+      if (heading < 0) heading += 360.0;
+      printLine(160, String(F("Heading: ")) + String(heading, 1) + F(" deg"), COL_WARN);
+      printLine(190, compassChip == COMPASS_HMC5883L ? F("Chip: HMC5883L") : F("Chip: QMC5883L"), COL_TEXT, 1);
+      logResult(F("HMC5883L/QMC5883"), true,
+                String(F("X=")) + String((int)x) + F(" Y=") + String((int)y) +
+                F(" Z=") + String((int)z) + F(" heading=") + String(heading, 1));
+    } else {
+      printLine(80, F("Read error"), COL_FAIL);
+      logResult(F("HMC5883L/QMC5883"), false, F("no data after request"));
+    }
 
-    if (liveWait(2000)) break; // выход по любой кнопке, иначе обновление через 2с
+    if (liveWait(1000)) { skipReturnWait = true; break; } // выход по любой кнопке, иначе обновление через 1с
   }
 }
 
@@ -806,40 +855,71 @@ bool ds3232OscillatorStopped() {
   return (status & 0x80) != 0;
 }
 
+inline byte bcd2bin(byte val) { return (val & 0x0F) + ((val >> 4) * 10); }
+
+// Читает время/дату из регистров 0x00-0x06 DS3231/DS3232 (стандартная
+// раскладка, без всякой библиотеки). Час корректно обрабатывается и в
+// 12-, и в 24-часовом режиме (бит6 регистра часов), на случай если модуль
+// ранее был настроен в 12-часовой режим каким-то другим устройством.
+bool ds3232ReadTime(byte &hour, byte &minute, byte &second, byte &date, byte &month, int &year) {
+  Wire.beginTransmission(I2C_ADDR_DS3232);
+  Wire.write(0x00);
+  if (Wire.endTransmission() != 0) return false;
+  Wire.requestFrom((int)I2C_ADDR_DS3232, 7);
+  if (Wire.available() < 7) return false;
+
+  second = bcd2bin(Wire.read() & 0x7F);
+  minute = bcd2bin(Wire.read() & 0x7F);
+
+  byte hourRaw = Wire.read();
+  if (hourRaw & 0x40) { // 12-часовой режим
+    bool pm = hourRaw & 0x20;
+    hour = bcd2bin(hourRaw & 0x1F);
+    if (hour == 12) hour = 0;
+    if (pm) hour += 12;
+  } else {              // 24-часовой режим
+    hour = bcd2bin(hourRaw & 0x3F);
+  }
+
+  Wire.read();          // день недели — не используется, но нужно вычитать
+  date = bcd2bin(Wire.read() & 0x3F);
+  byte monthRaw = Wire.read();
+  month = bcd2bin(monthRaw & 0x1F);
+  bool century = monthRaw & 0x80;
+  year = 2000 + bcd2bin(Wire.read()) + (century ? 100 : 0);
+  return true;
+}
+
 void testRTC_DS3232() {
   screenHeader(F("3. RTC DS3232"));
 
   if (!i2cPresent(I2C_ADDR_DS3232)) {
     statusBadge(false, 40);
-    printLine(80, F("Ne obnaruzhen (0x68)"), COL_FAIL);
-    logResult(F("DS3232"), false, F("не найден на I2C 0x68"));
+    printLine(80, F("Not found (0x68)"), COL_FAIL);
+    logResult(F("DS3232"), false, F("not found on I2C 0x68"));
     delay(1500);
     return;
   }
 
-  bool century = false;
-  bool h12Flag = false;
-  bool pmFlag = false;
-
-  byte hour   = rtcClock.getHour(h12Flag, pmFlag);
-  byte minute = rtcClock.getMinute();
-  byte second = rtcClock.getSecond();
-  byte day    = rtcClock.getDate();
-  byte month  = rtcClock.getMonth(century);
-  int  year   = 2000 + rtcClock.getYear();
-
+  byte hour, minute, second, date, month;
+  int year;
+  bool ok = ds3232ReadTime(hour, minute, second, date, month, year);
   bool lowBat = ds3232OscillatorStopped();
 
-  statusBadge(true, 40);
-  char buf[24];
-  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hour, minute, second);
-  printLine(80, String(buf), COL_TEXT, 3);
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02d", year, month, day);
-  printLine(115, String(buf), COL_TEXT);
-  printLine(150, lowBat ? F("Batareya: PROVERIT") : F("Batareya: OK"),
-            lowBat ? COL_WARN : COL_OK);
-
-  logResult(F("DS3232"), true, String(buf) + (lowBat ? F(" (низкий заряд батареи BT1!)") : F("")));
+  statusBadge(ok, 40);
+  if (ok) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hour, minute, second);
+    printLine(80, String(buf), COL_TEXT, 3);
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d", year, month, date);
+    printLine(115, String(buf), COL_TEXT);
+    printLine(150, lowBat ? F("Battery: CHECK") : F("Battery: OK"),
+              lowBat ? COL_WARN : COL_OK);
+    logResult(F("DS3232"), true, String(buf) + (lowBat ? F(" (BT1 battery low!)") : F("")));
+  } else {
+    printLine(80, F("Read error"), COL_FAIL);
+    logResult(F("DS3232"), false, F("no data after register request"));
+  }
   delay(1500);
 }
 
@@ -869,9 +949,9 @@ void testEEPROM_AT24C32() {
 
   if (!i2cPresent(I2C_ADDR_EEPROM)) {
     statusBadge(false, 40);
-    printLine(80, F("Ne otvechaet 0x50"), COL_FAIL);
-    printLine(105, F("proverte adres A0-A2"), COL_WARN, 1);
-    logResult(F("AT24C32"), false, F("нет ответа по адресу 0x50 — проверьте адресные пины A0..A2"));
+    printLine(80, F("No reply on 0x50"), COL_FAIL);
+    printLine(105, F("check A0-A2 address"), COL_WARN, 1);
+    logResult(F("AT24C32"), false, F("no reply at address 0x50 - check address pins A0..A2"));
     delay(1500);
     return;
   }
@@ -884,15 +964,16 @@ void testEEPROM_AT24C32() {
   bool ok = wOk && (rVal == testValue);
 
   statusBadge(ok, 40);
-  printLine(80, String(F("Zapis: ")) + String(testValue), COL_TEXT);
-  printLine(105, String(F("Chtenie: ")) + String(rVal), COL_TEXT);
-  logResult(F("AT24C32"), ok, String(F("записано=")) + String(testValue) + F(" прочитано=") + String(rVal));
+  printLine(80, String(F("Write: ")) + String(testValue), COL_TEXT);
+  printLine(105, String(F("Read: ")) + String(rVal), COL_TEXT);
+  logResult(F("AT24C32"), ok, String(F("written=")) + String(testValue) + F(" read=") + String(rVal));
   delay(1500);
 }
 
 // ============================ ТЕСТ DHT11 ====================================
 void testDHT11() {
   screenHeader(F("5. DHT11"));
+  printExitHint();
   waitLadderRelease();
   while (true) {
     int temperature = 0;
@@ -903,22 +984,23 @@ void testDHT11() {
     statusBadge(ok, 40);
     if (ok) {
       printLine(80, String(F("Temp: ")) + String(temperature) + F(" C"), COL_TEXT, 3);
-      printLine(120, String(F("Vlazhnost: ")) + String(humidity) + F(" %"), COL_TEXT);
+      printLine(120, String(F("Humidity: ")) + String(humidity) + F(" %"), COL_TEXT);
       logResult(F("DHT11"), true, String(F("t=")) + String(temperature) + F("C h=") + String(humidity) + F("%"));
     } else {
       String err = dhtSensor.getErrorString(result);
-      printLine(80, F("Oshibka:"), COL_FAIL);
+      printLine(80, F("Error:"), COL_FAIL);
       printLine(105, err, COL_FAIL, 1);
       logResult(F("DHT11"), false, err);
     }
 
-    if (liveWait(2000)) break; // выход по любой кнопке, иначе обновление через 2с
+    if (liveWait(1000)) { skipReturnWait = true; break; } // выход по любой кнопке, иначе обновление через 1с
   }
 }
 
 // ============================ ТЕСТ LM35 =====================================
 void testLM35() {
   screenHeader(F("6. LM35 (analog)"));
+  printExitHint();
   waitLadderRelease();
   while (true) {
     int raw = analogRead(PIN_LM35);
@@ -931,13 +1013,14 @@ void testLM35() {
     printLine(140, String(F("T: ")) + String(tempC, 1) + F(" C"), COL_WARN, 3);
     logResult(F("LM35"), true, String(F("ADC=")) + String(raw) + F(" T=") + String(tempC, 1) + F("C"));
 
-    if (liveWait(2000)) break;
+    if (liveWait(1000)) { skipReturnWait = true; break; }
   }
 }
 
 // ============================ ТЕСТ LDR (GL5549) ===============================
 void testLDR() {
-  screenHeader(F("7. Fotorezistor LDR"));
+  screenHeader(F("7. Photoresistor LDR"));
+  printExitHint();
   waitLadderRelease();
   while (true) {
     int raw = analogRead(PIN_LDR);
@@ -946,54 +1029,56 @@ void testLDR() {
     statusBadge(true, 40);
     printLine(80, String(F("ADC: ")) + String(raw), COL_TEXT, 3);
     printLine(115, String(F("U: ")) + String(voltage, 2) + F(" V"), COL_TEXT);
-    String level = raw > 700 ? F("Temno") : (raw > 300 ? F("Sredne") : F("Yarko"));
-    printLine(150, String(F("Uroven: ")) + level, COL_WARN);
+    String level = raw > 700 ? F("Dark") : (raw > 300 ? F("Medium") : F("Bright"));
+    printLine(150, String(F("Level: ")) + level, COL_WARN);
     logResult(F("LDR (GL5549)"), true, String(F("ADC=")) + String(raw) + F(" (") + level + F(")"));
 
-    if (liveWait(2000)) break;
+    if (liveWait(1000)) { skipReturnWait = true; break; }
   }
 }
 
-// ============================ ТЕСТ спарэ A0 ===================================
+// ============================ ТЕСТ ПЕРЕМЕННОГО РЕЗИСТОРА (A0) ===================
 void testSpareA0() {
-  screenHeader(F("8. Zapasnoy vkhod A0"));
-  int raw = analogRead(PIN_SPARE_A0);
-  float voltage = raw * (5.0 / 1023.0);
+  screenHeader(F("8. Variable Resistor"));
+  printExitHint();
+  waitLadderRelease();
+  while (true) {
+    int raw = analogRead(PIN_SPARE_A0);
+    float voltage = raw * (5.0 / 1023.0);
 
-  statusBadge(true, 40);
-  printLine(80, String(F("ADC: ")) + String(raw), COL_TEXT, 3);
-  printLine(115, String(F("U: ")) + String(voltage, 2) + F(" V"), COL_TEXT);
-  logResult(F("A0 (spare)"), true, String(F("ADC=")) + String(raw) + F(" U=") + String(voltage, 2) + F("V"));
-  delay(1200);
+    statusBadge(true, 40);
+    printLine(80, String(F("ADC: ")) + String(raw), COL_TEXT, 3);
+    printLine(115, String(F("U: ")) + String(voltage, 2) + F(" V"), COL_TEXT);
+    logResult(F("A0 (variable R)"), true, String(F("ADC=")) + String(raw) + F(" U=") + String(voltage, 2) + F("V"));
+
+    if (liveWait(1000)) { skipReturnWait = true; break; }
+  }
 }
 
 // ======================== ТЕСТ КНОПОК D2 / D3 ==================================
 void testDigitalButtons() {
-  screenHeader(F("9. Knopki D2/D3"));
-  bool b2 = (digitalRead(PIN_BTN_D2) == LOW); // SW3
-  bool b3 = (digitalRead(PIN_BTN_D3) == LOW); // SW4
+  screenHeader(F("9. Buttons D2/D3"));
+  printExitHint();
+  waitLadderRelease();
 
-  printLine(50, String(F("SW3 (D2): ")) + (b2 ? F("NAZHATA") : F("otpushena")),
-            b2 ? COL_OK : COL_TEXT);
-  printLine(90, String(F("SW4 (D3): ")) + (b3 ? F("NAZHATA") : F("otpushena")),
-            b3 ? COL_OK : COL_TEXT);
-  printLine(140, F("Nazhmite knopku..."), COL_WARN, 1);
+  bool b2 = false, b3 = false; // начальные значения не важны — см. флаг first
+  bool first = true;
 
-  logResult(F("SW3/D2"), true, b2 ? F("нажата") : F("отпущена"));
-  logResult(F("SW4/D3"), true, b3 ? F("нажата") : F("отпущена"));
+  while (true) {
+    bool nb2 = (digitalRead(PIN_BTN_D2) == LOW); // SW3
+    bool nb3 = (digitalRead(PIN_BTN_D3) == LOW); // SW4
 
-  // короткое окно ожидания, чтобы можно было увидеть нажатие вживую
-  unsigned long t0 = millis();
-  while (millis() - t0 < 1500) {
-    bool nb2 = (digitalRead(PIN_BTN_D2) == LOW);
-    bool nb3 = (digitalRead(PIN_BTN_D3) == LOW);
-    if (nb2 != b2 || nb3 != b3) {
-      b2 = nb2; b3 = nb3;
-      printLine(50, String(F("SW3 (D2): ")) + (b2 ? F("NAZHATA ") : F("otpushena ")),
+    if (first || nb2 != b2 || nb3 != b3) {
+      b2 = nb2; b3 = nb3; first = false;
+      printLine(50, String(F("SW3 (D2): ")) + (b2 ? F("PRESSED ") : F("released ")),
                 b2 ? COL_OK : COL_TEXT);
-      printLine(90, String(F("SW4 (D3): ")) + (b3 ? F("NAZHATA ") : F("otpushena ")),
+      printLine(90, String(F("SW4 (D3): ")) + (b3 ? F("PRESSED ") : F("released ")),
                 b3 ? COL_OK : COL_TEXT);
+      logResult(F("SW3/D2"), true, b2 ? F("pressed") : F("released"));
+      logResult(F("SW4/D3"), true, b3 ? F("pressed") : F("released"));
     }
+
+    if (liveWait(1000)) { skipReturnWait = true; break; }
   }
 }
 
@@ -1001,7 +1086,7 @@ void testDigitalButtons() {
 // Библиотека Pololu VL53L0X (github.com/pololu/vl53l0x-arduino) — не зависит
 // от Adafruit_BusIO, гораздо компактнее Adafruit_VL53L0X.
 void testDistanceVL53L0X() {
-  screenHeader(F("10. Dalnomer VL53L0X"));
+  screenHeader(F("10. Distance VL53L0X"));
 
   static bool inited = false;
   static bool initOk = false;
@@ -1014,11 +1099,12 @@ void testDistanceVL53L0X() {
   if (!initOk) {
     statusBadge(false, 40);
     printLine(80, F("Init FAIL (0x29)"), COL_FAIL);
-    logResult(F("VL53L0X"), false, F("инициализация не удалась / не найден на I2C 0x29"));
+    logResult(F("VL53L0X"), false, F("init failed / not found on I2C 0x29"));
     delay(1500);
     return;
   }
 
+  printExitHint();
   waitLadderRelease();
   while (true) {
     uint16_t mm = distanceSensor.readRangeSingleMillimeters();
@@ -1028,13 +1114,13 @@ void testDistanceVL53L0X() {
     if (!timeout) {
       printLine(80, F("Distance:"), COL_TEXT);
       printLine(105, String(mm) + F(" mm"), COL_WARN, 3);
-      logResult(F("VL53L0X"), true, String(mm) + F(" мм"));
+      logResult(F("VL53L0X"), true, String(mm) + F(" mm"));
     } else {
-      printLine(80, F("Timeout / vne diapazona"), COL_FAIL, 1);
-      logResult(F("VL53L0X"), false, F("таймаут датчика"));
+      printLine(80, F("Timeout / out of range"), COL_FAIL, 1);
+      logResult(F("VL53L0X"), false, F("sensor timeout"));
     }
 
-    if (liveWait(2000)) break; // выход по любой кнопке, иначе обновление через 2с
+    if (liveWait(1000)) { skipReturnWait = true; break; } // выход по любой кнопке, иначе обновление через 1с
   }
 }
 
@@ -1051,8 +1137,8 @@ void testBuzzer() {
   }
 
   statusBadge(true, 110);
-  printLine(150, F("3 korotkikh signala"), COL_TEXT);
-  logResult(F("Buzzer/Q1"), true, F("выдано 3 коротких сигнала на D5"));
+  printLine(150, F("3 short beeps"), COL_TEXT);
+  logResult(F("Buzzer/Q1"), true, F("3 short beeps issued on D5"));
   delay(1000);
 }
 
@@ -1085,17 +1171,17 @@ void testHC12() {
   String resp;
   bool atOk = hc12SendAT(F("AT"), resp);
 
-  printLine(65, F("AT rezhim (SET=0):"), COL_WARN, 1);
+  printLine(65, F("AT mode (SET=0):"), COL_WARN, 1);
   if (atOk) {
-    printLine(85, String(F("Otvet: ")) + resp, COL_OK, 1);
+    printLine(85, String(F("Reply: ")) + resp, COL_OK, 1);
   } else {
-    printLine(85, F("Net otveta ot modulya"), COL_FAIL, 1);
+    printLine(85, F("No reply from module"), COL_FAIL, 1);
   }
 
   // на всякий случай спросим версию модуля
   String verResp;
   bool verOk = hc12SendAT(F("AT+V"), verResp);
-  if (verOk) printLine(105, String(F("Versiya: ")) + verResp, COL_TEXT, 1);
+  if (verOk) printLine(105, String(F("Version: ")) + verResp, COL_TEXT, 1);
 
   // --- шаг 2: возвращаем нормальный режим передачи (SET=HIGH) ---
   digitalWrite(PIN_HC12_SET, HC12_MODE_NORMAL);
@@ -1112,13 +1198,13 @@ void testHC12() {
 
   bool overallOk = atOk; // главный критерий исправности — ответ модуля в AT-режиме
   statusBadge(overallOk, 130);
-  printLine(160, F("Normalny rezhim (SET=1):"), COL_TEXT, 1);
-  printLine(180, F("paket otpravlen"), COL_TEXT, 1);
-  printLine(200, gotEcho ? (String(F("otvet: ")) + echo) : String(F("otveta net (norma)")), COL_TEXT, 1);
+  printLine(160, F("Normal mode (SET=1):"), COL_TEXT, 1);
+  printLine(180, F("packet sent"), COL_TEXT, 1);
+  printLine(200, gotEcho ? (String(F("reply: ")) + echo) : String(F("no reply (normal)")), COL_TEXT, 1);
 
   logResult(F("HC-12"), overallOk,
-            String(F("AT-rezhim: ")) + (atOk ? (String(F("отвечает (")) + resp + F(")")) : String(F("не отвечает"))) +
-            (verOk ? (String(F("; версия: ")) + verResp) : String(F(""))) +
-            F("; нормальный режим: пакет отправлен") + (gotEcho ? (String(F(", ответ: ")) + echo) : String(F(", ответа нет (норма без второго модуля)"))));
+            String(F("AT mode: ")) + (atOk ? (String(F("responds (")) + resp + F(")")) : String(F("no response"))) +
+            (verOk ? (String(F("; version: ")) + verResp) : String(F(""))) +
+            F("; normal mode: packet sent") + (gotEcho ? (String(F(", reply: ")) + echo) : String(F(", no reply (normal without a second module)"))));
   delay(1800);
 }
