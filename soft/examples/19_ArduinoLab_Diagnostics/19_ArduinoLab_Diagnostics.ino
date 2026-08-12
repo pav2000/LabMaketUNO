@@ -44,14 +44,40 @@
                              VL53L0X — компактнее Adafruit_VL53L0X, не тянет
                              Adafruit_BusIO)
 
-  Тесты компаса, DHT11, LM35 и фоторезистора работают в режиме "живого"
-  просмотра: значения обновляются раз в 1 секунду, выход в меню — по любой
-  кнопке (не дожидаясь окончания цикла).
+  Тесты компаса, DHT11, LM35, фоторезистора, переменного резистора, кнопок
+  D2/D3 и дальномера работают в режиме "живого" просмотра: значения
+  обновляются раз в 1 секунду, подсказка "Any button = exit" выводится сразу,
+  выход в меню — по одному нажатию любой кнопки (не дожидаясь цикла).
 
-  Экран переведён на собственный минимальный SPI-драйвер (без Adafruit_GFX/
-  ST7789/BusIO). 
+  Экран работает через отдельную библиотеку MiniTFT (папка MiniTFT/ рядом со
+  скетчем — установите в Arduino/libraries) — минимальный SPI-драйвер ST7789
+  без Adafruit_GFX/ST7789/BusIO. Путь до рабочей комбинации параметров был не
+  совсем прямым — коротко, для истории и на случай переноса на другую партию
+  модулей (подробности и как их подбирать — см. MiniTFT/README.md):
+    1) Первая попытка (SPI_MODE0, без офсета) была полностью тёмной.
+    2) Сравнение с рабочим кодом на Adafruit_ST7789 показало: экрану нужен
+       SPI_MODE3 (не MODE0) — это буквально подтверждено комментарием в
+       исходниках Adafruit ("certain display needs MODE3 instead").
+    3) У Adafruit_ST7789 контроллер физически адресует GRAM 240x320, хотя
+       видна только матрица 240x240 — нужно смещение в CASET/RASET. Для
+       rotation=1 (как в рабочем примере пользователя) это смещение +80
+       идёт по оси X, а MADCTL = 0xA0 (биты MY|MV) — не 0x00 и не 0xC0,
+       как можно было бы предположить для rotation=0.
+    4) Даже с правильными MODE3+MADCTL+офсетом одна попытка инициализации
+       сразу после подачи питания оказалась НЕНАДЁЖНОЙ (иногда экран
+       оставался тёмным). Экспериментально подтверждено: повтор полной
+       последовательности инициализации дважды подряд решает эту проблему
+       полностью и стабильно (проверено несколькими циклами полного
+       отключения/включения питания).
+  Все четыре пункта учтены внутри библиотеки MiniTFT (MiniTFT/src/MiniTFT.cpp);
+  в этом файле их значения только передаются через setSpiSpeed()/setSpiMode()/
+  setMadctl()/setOffset() в setup() (см. блок PIN CONFIG и SETUP ниже).
+
   ------------------------- НУЖНЫЕ БИБЛИОТЕКИ ------------------------------
   (Скетч -> Подключить библиотеку -> Управлять библиотеками)
+    - MiniTFT (собственная, папка MiniTFT/ рядом со скетчем — установите в
+      Arduino/libraries, см. MiniTFT/README.md)  — вместо Adafruit_GFX +
+      Adafruit_ST7789 + Adafruit_BusIO
     - DHT11 (Dhruba Saha, dhrubasaha08/DHT11)  — вместо Adafruit DHT sensor library
     - VL53L0X (Pololu, pololu/vl53l0x-arduino) — вместо Adafruit_VL53L0X
   Wire, SPI, SoftwareSerial — входят в состав Arduino IDE.
@@ -62,6 +88,10 @@
   ds3232ReadTime() ниже) — без сторонних библиотек вообще.
 
   --------------------------- ВАЖНЫЕ ДОПУЩЕНИЯ ------------------------------
+  На схеме сигналы RES/DC экрана и адрес EEPROM НЕ подписаны конкретными
+  номерами пинов Arduino (видны только имена цепей). Ниже взяты свободные
+  пины по остаточному принципу — ОБЯЗАТЕЛЬНО сверьте с вашей платой и
+  поправьте в блоке "PIN CONFIG" при необходимости:
     TFT_RST = 10, TFT_DC = 9, CS — не подключен (модуль сажает его на GND,
     свой драйвер этот пин вообще не использует). Подсветка (BLK) всегда
     включена аппаратно и кодом не управляется.
@@ -81,6 +111,7 @@
 
 #include <SPI.h>
 #include <Wire.h>
+#include <MiniTFT.h>   // отдельная библиотека — см. MiniTFT/ (установите в Arduino/libraries)
 #include <DHT11.h>
 #include <VL53L0X.h>
 #include <SoftwareSerial.h>
@@ -120,213 +151,35 @@
 #define FW_VERSION "v1.5"
 
 // Параметры SPI/адресации ST7789, подобранные экспериментально для этой
-// партии модулей (см. историю чата — перебор режимов SPI и офсетов):
+// партии модулей (см. историю чата — перебор режимов SPI и офсетов; теперь
+// они передаются в библиотеку MiniTFT через setSpiSpeed()/setSpiMode()/
+// setMadctl()/setOffset() в setup(), см. ниже):
 //   - SPI_MODE3 (не MODE0!) — конкретно этот экран требует именно его
 //     (в исходниках Adafruit_ST77xx.h есть заводской комментарий:
 //     "certain display needs MODE3 instead")
 //   - MADCTL = 0xA0 (биты MY|MV) и смещение +80 по X — соответствует
 //     rotation=1 в терминах Adafruit_ST7789 (GRAM контроллера 240x320,
 //     видимая матрица 240x240 занимает только часть этой памяти)
-//   - инициализация выполняется ДВАЖДЫ подряд: на практике одного прохода
-//     сразу после подачи питания оказалось недостаточно для стабильного
-//     запуска этой партии модулей, повтор полностью решает проблему
+//   - инициализация выполняется ДВАЖДЫ подряд (уже внутри MiniTFT::init()):
+//     на практике одного прохода сразу после подачи питания оказалось
+//     недостаточно для стабильного запуска этой партии модулей
 #define TFT_SPI_SPEED_HZ 8000000UL
 #define TFT_SPI_MODE     SPI_MODE3
 #define TFT_MADCTL       0xA0
 #define TFT_X_OFFSET     80
 #define TFT_Y_OFFSET     0
 
-// ========================== СВОЙ ДРАЙВЕР ST7789 =============================
-// Заменяет Adafruit_GFX + Adafruit_ST7789 (которые тянут Adafruit_BusIO).
-// Только то, что реально используется в этом скетче: заливка прямоугольников,
-// линии и текст компактным шрифтом 5x7 (только заглавные буквы — экономия
-// флеша; строчные буквы автоматически переводятся в заглавные при выводе).
-
-// Компактный шрифт 5x7, только заглавные буквы/цифры/пунктуация (см. FONT_CHARS).
-const char FONT_CHARS[] PROGMEM = " !%()+,-./0123456789:=ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const uint8_t FONT_DATA[48][5] PROGMEM = {
-  { 0x00, 0x00, 0x00, 0x00, 0x00 }, // 'SPACE'
-  { 0x00, 0x2F, 0x00, 0x00, 0x00 }, // '!'
-  { 0x63, 0x10, 0x08, 0x26, 0x41 }, // '%'
-  { 0x1C, 0x22, 0x41, 0x00, 0x00 }, // '('
-  { 0x00, 0x00, 0x41, 0x22, 0x1C }, // ')'
-  { 0x08, 0x08, 0x3E, 0x08, 0x08 }, // '+'
-  { 0x40, 0x20, 0x00, 0x00, 0x00 }, // ','
-  { 0x08, 0x08, 0x08, 0x08, 0x08 }, // '-'
-  { 0x60, 0x60, 0x00, 0x00, 0x00 }, // '.'
-  { 0x10, 0x08, 0x04, 0x02, 0x01 }, // '/'
-  { 0x3E, 0x51, 0x49, 0x45, 0x3E }, // '0'
-  { 0x00, 0x42, 0x7F, 0x40, 0x00 }, // '1'
-  { 0x42, 0x61, 0x51, 0x49, 0x46 }, // '2'
-  { 0x21, 0x41, 0x49, 0x4D, 0x32 }, // '3'
-  { 0x18, 0x14, 0x12, 0x7F, 0x10 }, // '4'
-  { 0x27, 0x45, 0x45, 0x45, 0x39 }, // '5'
-  { 0x3C, 0x4A, 0x49, 0x49, 0x30 }, // '6'
-  { 0x01, 0x71, 0x09, 0x05, 0x03 }, // '7'
-  { 0x36, 0x49, 0x49, 0x49, 0x36 }, // '8'
-  { 0x06, 0x09, 0x49, 0x69, 0x1E }, // '9'
-  { 0x00, 0x00, 0x36, 0x00, 0x00 }, // ':'
-  { 0x0A, 0x0A, 0x0A, 0x0A, 0x0A }, // '='
-  { 0x7E, 0x09, 0x09, 0x09, 0x7E }, // 'A'
-  { 0x7F, 0x49, 0x49, 0x49, 0x36 }, // 'B'
-  { 0x3E, 0x41, 0x41, 0x41, 0x22 }, // 'C'
-  { 0x7F, 0x41, 0x41, 0x41, 0x3E }, // 'D'
-  { 0x7F, 0x49, 0x49, 0x49, 0x41 }, // 'E'
-  { 0x7F, 0x09, 0x09, 0x09, 0x01 }, // 'F'
-  { 0x3E, 0x41, 0x49, 0x49, 0x3A }, // 'G'
-  { 0x7F, 0x08, 0x08, 0x08, 0x7F }, // 'H'
-  { 0x00, 0x41, 0x7F, 0x41, 0x00 }, // 'I'
-  { 0x20, 0x40, 0x40, 0x41, 0x3F }, // 'J'
-  { 0x7F, 0x08, 0x14, 0x22, 0x41 }, // 'K'
-  { 0x7F, 0x40, 0x40, 0x40, 0x40 }, // 'L'
-  { 0x7F, 0x02, 0x04, 0x02, 0x7F }, // 'M'
-  { 0x7F, 0x02, 0x04, 0x08, 0x7F }, // 'N'
-  { 0x3E, 0x41, 0x41, 0x41, 0x3E }, // 'O'
-  { 0x7F, 0x09, 0x09, 0x09, 0x06 }, // 'P'
-  { 0x3E, 0x41, 0x51, 0x21, 0x5E }, // 'Q'
-  { 0x7F, 0x09, 0x19, 0x29, 0x46 }, // 'R'
-  { 0x46, 0x49, 0x49, 0x49, 0x31 }, // 'S'
-  { 0x01, 0x01, 0x7F, 0x01, 0x01 }, // 'T'
-  { 0x3F, 0x40, 0x40, 0x40, 0x3F }, // 'U'
-  { 0x1F, 0x20, 0x40, 0x20, 0x1F }, // 'V'
-  { 0x3F, 0x40, 0x38, 0x40, 0x3F }, // 'W'
-  { 0x63, 0x14, 0x08, 0x14, 0x63 }, // 'X'
-  { 0x03, 0x04, 0x78, 0x04, 0x03 }, // 'Y'
-  { 0x61, 0x51, 0x49, 0x45, 0x43 }, // 'Z'
-};
-#define FONT_COUNT 48
-
-class MiniTFT {
-public:
-  void init(uint16_t w, uint16_t h) {
-    _w = w; _h = h;
-    pinMode(TFT_DC, OUTPUT);
-    pinMode(TFT_RST, OUTPUT);
-
- //   delay(200); // стабилизация питания после старта — критично для этой платы
-
-    SPI.begin();
-    SPI.beginTransaction(SPISettings(TFT_SPI_SPEED_HZ, MSBFIRST, TFT_SPI_MODE));
-
-    // Инициализация выполняется дважды — экспериментально подтверждено,
-    // что одного прохода сразу после включения питания недостаточно.
-    initSequence();
-  //  initSequence();
-  }
-
-  void setRotation(uint8_t) { /* поддерживается только найденная рабочая ориентация */ }
-
-  void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
-    if (x >= _w || y >= _h || w <= 0 || h <= 0) return;
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > _w) w = _w - x;
-    if (y + h > _h) h = _h - y;
-    if (w <= 0 || h <= 0) return;
-
-    setAddrWindow(x, y, x + w - 1, y + h - 1);
-    digitalWrite(TFT_DC, HIGH);
-    uint8_t hi = color >> 8, lo = color & 0xFF;
-    uint32_t n = (uint32_t)w * (uint32_t)h;
-    for (uint32_t i = 0; i < n; i++) { SPI.transfer(hi); SPI.transfer(lo); }
-  }
-
-  void fillScreen(uint16_t color) { fillRect(0, 0, _w, _h, color); }
-  void fillRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t /*r*/, uint16_t color) {
-    fillRect(x, y, w, h, color); // радиус игнорируем — экономим флеш
-  }
-  void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color) { fillRect(x, y, w, 1, color); }
-
-  void setTextColor(uint16_t fg) { _fg = fg; _useBg = false; }
-  void setTextColor(uint16_t fg, uint16_t bg) { _fg = fg; _bg = bg; _useBg = true; }
-  void setCursor(int16_t x, int16_t y) { _cx = x; _cy = y; }
-  void setTextSize(uint8_t s) { _size = (s == 0) ? 1 : s; }
-  void setTextWrap(bool) { /* перенос строк не поддерживается — не требуется */ }
-
-  void print(const String &s) {
-    for (uint16_t i = 0; i < s.length(); i++) {
-      char c = s[i];
-      if (c == '\n') { _cx = 0; _cy += 8 * _size; continue; }
-      drawChar(_cx, _cy, c);
-      _cx += 6 * _size;
-    }
-  }
-  void print(const char* s)     { print(String(s)); }
-  void print(const __FlashStringHelper* s) { print(String(s)); } // строки из PROGMEM (F())
-  void print(char c)            { char b[2] = { c, 0 }; print(String(b)); }
-  void print(int n)             { print(String(n)); }
-  void print(unsigned int n)    { print(String(n)); }
-  void print(unsigned char n, int base) { print(String(n, base)); }
-
-  void println(const String &s) { print(s); print('\n'); }
-  void println(const char* s)   { println(String(s)); }
-  void println(const __FlashStringHelper* s) { println(String(s)); } // строки из PROGMEM (F())
-  void println(int n)           { println(String(n)); }
-  void println(unsigned char n) { println(String(n)); }
-
-private:
-  int16_t _w = 0, _h = 0;
-  int16_t _cx = 0, _cy = 0;
-  uint16_t _fg = 0xFFFF, _bg = 0x0000;
-  uint8_t _size = 1;
-  bool _useBg = false;
-
-  void cmd(uint8_t c) { digitalWrite(TFT_DC, LOW);  SPI.transfer(c); }
-  void dat(uint8_t d) { digitalWrite(TFT_DC, HIGH); SPI.transfer(d); }
-  void dat16(uint16_t d) { digitalWrite(TFT_DC, HIGH); SPI.transfer(d >> 8); SPI.transfer(d & 0xFF); }
-
-  void initSequence() {
-    digitalWrite(TFT_RST, HIGH); delay(10);
-    digitalWrite(TFT_RST, LOW);  delay(20);
-    digitalWrite(TFT_RST, HIGH); delay(150);
-
-    cmd(0x01); delay(150);           // SWRESET
-    cmd(0x11); delay(120);           // SLPOUT
-    cmd(0x3A); dat(0x55); delay(10); // COLMOD: 16 бит/пиксель
-    cmd(0x36); dat(TFT_MADCTL);      // MADCTL: 0xA0 (MY|MV) — найдено экспериментально
-    cmd(0x21); delay(10);            // INVON
-    cmd(0x13); delay(10);            // NORON
-    cmd(0x29); delay(10);            // DISPON
-  }
-
-  void setAddrWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-    x0 += TFT_X_OFFSET; x1 += TFT_X_OFFSET; // смещение GRAM (240x320 -> видимые 240x240)
-    y0 += TFT_Y_OFFSET; y1 += TFT_Y_OFFSET;
-    cmd(0x2A); dat16(x0); dat16(x1); // CASET
-    cmd(0x2B); dat16(y0); dat16(y1); // RASET
-    cmd(0x2C);                       // RAMWR
-  }
-
-  void drawChar(int16_t x, int16_t y, char c) {
-    if (c >= 'a' && c <= 'z') c -= 32; // приводим к верхнему регистру
-    int8_t idx = -1;
-    for (uint8_t i = 0; i < FONT_COUNT; i++) {
-      if ((char)pgm_read_byte(&FONT_CHARS[i]) == c) { idx = i; break; }
-    }
-    if (idx < 0) return; // неизвестный символ — пропускаем (место всё равно сдвинется)
-
-    for (uint8_t col = 0; col < 5; col++) {
-      uint8_t line = pgm_read_byte(&(FONT_DATA[idx][col]));
-      for (uint8_t row = 0; row < 7; row++) {
-        bool on = line & (1 << row);
-        if (!on && !_useBg) continue; // прозрачный фон — «пустые» пиксели не трогаем
-        uint16_t color = on ? _fg : _bg;
-        if (_size == 1) fillRect(x + col, y + row, 1, 1, color);
-        else fillRect(x + col * _size, y + row * _size, _size, _size, color);
-      }
-    }
-  }
-};
-
-// цвета (значения RGB565, совпадают с прежними ST77XX_* из Adafruit_ST7789)
-#define ST77XX_BLACK   0x0000
-#define ST77XX_WHITE   0xFFFF
-#define ST77XX_RED     0xF800
-#define ST77XX_GREEN   0x07E0
-#define ST77XX_BLUE    0x001F
-#define ST77XX_CYAN    0x07FF
-#define ST77XX_MAGENTA 0xF81F
-#define ST77XX_YELLOW  0xFFE0
+// Библиотека MiniTFT (см. папку MiniTFT/ рядом со скетчем) определяет свои
+// цвета как MTFT_*. Здесь — алиасы под старые имена ST77XX_*/COL_*, чтобы
+// весь остальной код скетча остался без изменений.
+#define ST77XX_BLACK   MTFT_BLACK
+#define ST77XX_WHITE   MTFT_WHITE
+#define ST77XX_RED     MTFT_RED
+#define ST77XX_GREEN   MTFT_GREEN
+#define ST77XX_BLUE    MTFT_BLUE
+#define ST77XX_CYAN    MTFT_CYAN
+#define ST77XX_MAGENTA MTFT_MAGENTA
+#define ST77XX_YELLOW  MTFT_YELLOW
 
 #define COL_BG     ST77XX_BLACK
 #define COL_TITLE  ST77XX_CYAN
@@ -334,10 +187,10 @@ private:
 #define COL_FAIL   ST77XX_RED
 #define COL_TEXT   ST77XX_WHITE
 #define COL_WARN   ST77XX_YELLOW
-#define COL_GREY   0x7BEF  // тёмно-серый (RGB565)
+#define COL_GREY   MTFT_GREY
 
 // ============================== ОБЪЕКТЫ ====================================
-MiniTFT tft;                     // свой драйвер ST7789 (без Adafruit_GFX/BusIO)
+MiniTFT tft(TFT_RST, TFT_DC);    // библиотека MiniTFT (без Adafruit_GFX/BusIO)
 DHT11 dhtSensor(PIN_DHT);        // библиотека DHT11 (Dhruba Saha) — пин задаётся в конструкторе
 VL53L0X distanceSensor;          // библиотека Pololu VL53L0X (без Adafruit_BusIO)
 SoftwareSerial hc12(HC12_ARDUINO_RX, HC12_ARDUINO_TX);
@@ -349,6 +202,9 @@ SoftwareSerial hc12(HC12_ARDUINO_RX, HC12_ARDUINO_TX);
 typedef void (*TestFunc)();
 
 // Явные прототипы тестовых функций — обязательны для массива указателей ниже.
+// Автогенерация прототипов Arduino IDE не всегда справляется с функциями,
+// используемыми как указатели в инициализаторе массива, поэтому объявляем
+// их здесь вручную (сами функции определены дальше по файлу).
 void testTFT();
 void testCompassHMC5883L();
 void testRTC_DS3232();
@@ -376,7 +232,10 @@ struct MenuItem {
   TestFunc func;
 };
 
-// Названия пунктов меню — во флеш-памяти (PROGMEM)
+// Названия пунктов меню — во флеш-памяти (PROGMEM). Объявлены отдельными
+// константами, а не через F(), потому что F()/PSTR() использует GCC
+// statement-expression, а он запрещён в инициализаторе ГЛОБАЛЬНОГО массива
+// (разрешён только внутри тела функций) — именно это и даёт ошибку компиляции.
 const char MENU_NAME_1[]  PROGMEM = "1  TFT ST7789";
 const char MENU_NAME_2[]  PROGMEM = "2  Compass HMC5883L";
 const char MENU_NAME_3[]  PROGMEM = "3  RTC DS3232";
@@ -409,7 +268,8 @@ const int NUM_MENU_ITEMS = sizeof(menuItems) / sizeof(menuItems[0]);
 int menuSelected = 0;
 
 // Пороговые значения ADC для лесенки кнопок A3 — присланы пользователем по
-// результатам реального тестирования платы 
+// результатам реального тестирования платы (заменяют более ранние
+// теоретические расчёты, которые давали неверную классификацию нажатий).
 enum LadderBtn { LB_NONE, LB_DOWN, LB_OK, LB_UP };
 
 LadderBtn readLadderRaw() {
@@ -545,8 +405,14 @@ void setup() {
 
   Wire.begin();
 
+  // Параметры экрана, подобранные экспериментально для этой партии модулей
+  // (см. TFT_SPI_SPEED_HZ/TFT_SPI_MODE/TFT_MADCTL/TFT_X_OFFSET/TFT_Y_OFFSET
+  // в блоке PIN CONFIG выше) — передаём в библиотеку MiniTFT ДО init().
+  tft.setSpiSpeed(TFT_SPI_SPEED_HZ);
+  tft.setSpiMode(TFT_SPI_MODE);
+  tft.setMadctl(TFT_MADCTL);
+  tft.setOffset(TFT_X_OFFSET, TFT_Y_OFFSET);
   tft.init(240, 240);
-  tft.setRotation(0);
   tft.fillScreen(COL_BG);
 
   hc12.begin(9600);
@@ -555,6 +421,7 @@ void setup() {
 }
 
 // ============================== LOOP =======================================
+// Циклической автопроверки больше нет — только меню с ручным выбором теста.
 // Полная перерисовка — только при входе в меню; Up/Down точечно обновляют
 // только две затронутые строки (старый и новый выбранный пункт).
 void loop() {
