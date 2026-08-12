@@ -629,6 +629,7 @@ int freeRam() {
 String i2cDeviceName(byte addr) {
   switch (addr) {
     case I2C_ADDR_HMC5883L: return F("HMC5883L (compass)");
+    case I2C_ADDR_QMC5883L: return F("QMC5883L (compass)");
     case 0x29:              return F("VL53L0X (distance)");
     case I2C_ADDR_EEPROM:   return F("AT24C32 (EEPROM)");
     case I2C_ADDR_DS3232:   return F("DS3232 (RTC)");
