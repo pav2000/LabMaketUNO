@@ -61,8 +61,8 @@ Additional breakouts: full analog pin header (A0–A5), power header
 
 # ArduinoLab — плата-шилд для Arduino Uno с датчиками и тестами
 
-<img src="images/board-photo.png" width="600" alt="Фото платы ArduinoLab"><br>
-<img src="images/board-render.png" width="600" alt="3D-рендер платы ArduinoLab">
+<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/main.png" width="640" /> <br>
+<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/view2.png" width="640" /> <br>
 
 ## Обзор
 
