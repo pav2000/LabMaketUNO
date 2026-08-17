@@ -1,6 +1,7 @@
 # ArduinoLab — Arduino Uno Sensor & Test Shield
-<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/main.png" width="640" /> <br>
-<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/view2.png" width="640" /> <br>
+
+<img src="hard/Picture/main.png" width="600" alt="ArduinoLab board photo"><br>
+<img src="hard/Picture/view2.png" width="600" alt="ArduinoLab board 3D render">
 
 ## Overview
 
@@ -11,22 +12,47 @@ platform: a single board on which you can practice working with I2C sensors,
 SPI displays, EEPROM, an RTC, a radio module and buttons — without wiring up
 a breadboard.
 
-The repository also contains a ready-made diagnostic firmware
-(`ArduinoLab_Diagnostics.ino`) with a menu-driven test for every device on the
-board, and a small standalone display library (`MiniTFT/`) written specifically
-for this board's screen.
+## Repository contents
+
+- **`doc/`** — datasheets for the ICs and modules used on (or connectable to)
+  the board: display/graphics (`Adafruit_GFX.pdf`), EEPROM (`AT24C32__64.pdf`),
+  HC-12 radio module, compass (`HMC5883L.pdf`, `QMC5883L Datasheet 1.0.pdf`),
+  distance sensor (`VL53L0X.PDF`, `vl53l0x.pdf`), load cell amplifier
+  (`HX711_v0_0_B.pdf`, `hx711F_EN.pdf`), IMU (`mpu6050.pdf` and a Russian-language
+  article on first use of the MPU6050 with STM32), plus a general reference
+  article (`AaSI-2015-1-11.pdf`).
+- **`hard/`** — hardware design files: schematic (`Schematic_ArduinoLab_2025-08-20.pdf`),
+  bill of materials (`BOM_ArduinoLab_2025-08-20.csv/.xls`), PCB manufacturing
+  files (`Gerber_ArduinoLab_PCB_ArduinoLab_12_end_2025-08-20.zip`), pick-and-place
+  file (`PickAndPlace_PCB_ArduinoLab_12_end_2025-08-20.csv/.xls`), and board
+  photos/renders in `Picture/` (top view, buttons close-up, and 3D renders).
+- **`soft/`** — firmware and software; see **[`soft/README.md`](soft/README.md)**
+  for a full description of every example. In short:
+  - `ArduinoLabTest/` — the original, non-menu-driven test sketch for the whole board.
+  - `examples/` — 19 numbered example sketches, from simple display demos up
+    to the final menu-driven diagnostic firmware (`19_ArduinoLab_Diagnostics`).
+  - `lib/` — the third-party Arduino libraries needed to compile the examples above.
+- **`README.md`** — this file.
+
+> **Note:** the final diagnostic sketch (`soft/examples/19_ArduinoLab_Diagnostics`)
+> is written against a custom `MiniTFT` display library (`#include <MiniTFT.h>`),
+> which is **not yet included in this repository** — it needs to be added
+> separately (as an `Arduino/libraries/MiniTFT` folder) before that specific
+> example will compile. Every other example uses only the libraries already
+> present in `soft/lib/`.
 
 ## Features
 
 - On-screen menu navigated with three buttons (Up / OK / Down), showing live
-  sensor readings that refresh once a second.
+  sensor readings that refresh once a second (in the final `19_ArduinoLab_Diagnostics` example).
 - Startup screen with firmware version, free RAM and an I2C bus scan.
 - Individual, selectable test for every sensor and peripheral on the board.
-- Compact custom ST7789 display driver (`MiniTFT` library) that does not
-  depend on Adafruit_GFX / Adafruit_BusIO — useful on flash-constrained
-  boards such as the Arduino Uno.
 - Automatic detection of HMC5883L vs. QMC5883L compass chip (many "GY-273"
-  modules actually carry a QMC5883L clone).
+  modules actually carry a QMC5883L clone) — used both in the diagnostic
+  firmware and demonstrated separately in `soft/examples/05_QMC5883_compass`.
+- A wide range of standalone example sketches for every sensor, the display,
+  and even optional external modules (MPU6050 IMU, HX711 load cell) that can
+  be connected via the board's spare I2C/digital headers.
 
 ## Onboard components
 
@@ -50,19 +76,14 @@ for this board's screen.
 
 Additional breakouts: full analog pin header (A0–A5), power header
 (IOREF / RESET / 3V3 / 5V / GND / VIN), and spare digital pin headers
-(D7 / D8, with +5V/GND) for expansion modules.
-
-## Related files in this repository
-
-- `ArduinoLab_Diagnostics.ino` — menu-driven diagnostic firmware for the whole board.
-- `MiniTFT/` — standalone Arduino library for the on-board ST7789 display.
+(D7 / D8, with +5V/GND) for expansion modules (e.g. an external MPU6050 or HX711).
 
 ---
 
 # ArduinoLab — плата-шилд для Arduino Uno с датчиками и тестами
 
-<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/main.png" width="640" /> <br>
-<img src="https://github.com/pav2000/LabMaketUNO/blob/main/hard/Picture/view2.png" width="640" /> <br>
+<img src="hard/Picture/main.png" width="600" alt="Фото платы ArduinoLab"><br>
+<img src="hard/Picture/view2.png" width="600" alt="3D-рендер платы ArduinoLab">
 
 ## Обзор
 
@@ -73,23 +94,51 @@ Additional breakouts: full analog pin header (A0–A5), power header
 практиковаться в работе с I2C-датчиками, SPI-экраном, EEPROM, часами
 реального времени, радиомодулем и кнопками — без макетной платы и проводов.
 
-В этом же репозитории лежит готовая диагностическая прошивка
-(`ArduinoLab_Diagnostics.ino`) с меню и тестом для каждого устройства на
-плате, а также небольшая отдельная библиотека для экрана (`MiniTFT/`),
-написанная специально под экран этой платы.
+## Содержимое репозитория
+
+- **`doc/`** — даташиты микросхем и модулей, установленных на плате (или
+  подключаемых к ней): дисплей/графика (`Adafruit_GFX.pdf`), EEPROM
+  (`AT24C32__64.pdf`), радиомодуль HC-12, компас (`HMC5883L.pdf`,
+  `QMC5883L Datasheet 1.0.pdf`), дальномер (`VL53L0X.PDF`, `vl53l0x.pdf`),
+  усилитель тензодатчика (`HX711_v0_0_B.pdf`, `hx711F_EN.pdf`), гироскоп-
+  акселерометр (`mpu6050.pdf` и статья на русском про первое включение
+  MPU6050 на STM32), а также общая справочная статья (`AaSI-2015-1-11.pdf`).
+- **`hard/`** — файлы аппаратной части: схема (`Schematic_ArduinoLab_2025-08-20.pdf`),
+  спецификация компонентов (`BOM_ArduinoLab_2025-08-20.csv/.xls`), файлы для
+  изготовления платы (`Gerber_ArduinoLab_PCB_ArduinoLab_12_end_2025-08-20.zip`),
+  файл для автоматической установки компонентов
+  (`PickAndPlace_PCB_ArduinoLab_12_end_2025-08-20.csv/.xls`), фото и рендеры
+  платы в папке `Picture/` (вид сверху, кнопки крупным планом, 3D-рендеры).
+- **`soft/`** — прошивка и программное обеспечение; полное описание каждого
+  примера — в **[`soft/README.md`](soft/README.md)**. Коротко:
+  - `ArduinoLabTest/` — исходный тестовый скетч для всей платы (без меню).
+  - `examples/` — 19 пронумерованных примеров: от простых демо экрана до
+    финальной диагностической прошивки с меню (`19_ArduinoLab_Diagnostics`).
+  - `lib/` — сторонние Arduino-библиотеки, нужные для сборки этих примеров.
+- **`README.md`** — этот файл.
+
+> **Важно:** финальный диагностический скетч (`soft/examples/19_ArduinoLab_Diagnostics`)
+> написан с использованием собственной библиотеки экрана `MiniTFT`
+> (`#include <MiniTFT.h>`), которой **пока нет в этом репозитории** — её нужно
+> добавить отдельно (как папку `Arduino/libraries/MiniTFT`), прежде чем именно
+> этот пример соберётся. Все остальные примеры используют только библиотеки,
+> уже лежащие в `soft/lib/`.
 
 ## Возможности
 
 - Меню на экране с навигацией тремя кнопками (Up / OK / Down), «живые»
-  показания датчиков обновляются раз в секунду.
+  показания датчиков обновляются раз в секунду (в финальном примере
+  `19_ArduinoLab_Diagnostics`).
 - Стартовый экран с версией прошивки, объёмом свободной RAM и результатами
   сканирования шины I2C.
 - Отдельный, выбираемый из меню тест для каждого датчика и узла платы.
-- Компактный собственный драйвер экрана ST7789 (библиотека `MiniTFT`) без
-  зависимости от Adafruit_GFX / Adafruit_BusIO — полезно на платах с
-  ограниченной флеш-памятью, таких как Arduino Uno.
 - Автоматическое определение реального чипа компаса — HMC5883L или
-  QMC5883L (многие модули "GY-273" на деле содержат клон QMC5883L).
+  QMC5883L (многие модули "GY-273" на деле содержат клон QMC5883L) — как в
+  диагностической прошивке, так и отдельно в примере `soft/examples/05_QMC5883_compass`.
+- Большой набор самостоятельных примеров под каждый датчик, экран, и даже
+  опциональные внешние модули (гироскоп-акселерометр MPU6050, усилитель
+  тензодатчика HX711), которые можно подключить через запасные
+  I2C/цифровые пины платы.
 
 ## Установленные на плате устройства
 
@@ -113,9 +162,5 @@ Additional breakouts: full analog pin header (A0–A5), power header
 
 Дополнительно на плате разведены: полный набор аналоговых пинов (A0–A5),
 разъём питания (IOREF / RESET / 3V3 / 5V / GND / VIN) и запасные цифровые
-пины (D7 / D8, с выводами +5V/GND) для подключения дополнительных модулей.
-
-## Связанные файлы в этом репозитории
-
-- `ArduinoLab_Diagnostics.ino` — диагностическая прошивка с меню для всей платы.
-- `MiniTFT/` — отдельная Arduino-библиотека для установленного на плате экрана ST7789.
+пины (D7 / D8, с выводами +5V/GND) для подключения дополнительных модулей
+(например, внешнего MPU6050 или HX711).
