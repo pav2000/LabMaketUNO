@@ -36,8 +36,9 @@ a breadboard.
 
 > **Note:** the final diagnostic sketch (`soft/examples/19_ArduinoLab_Diagnostics`)
 > is written against a custom `MiniTFT` display library (`#include <MiniTFT.h>`),
-> which is **not yet included in this repository** — it needs to be added
-> separately (as an `Arduino/libraries/MiniTFT` folder) before that specific
+> which is **not included in this repository** — it lives in its own repository:
+> **[pav2000/MiniTFT_ST7789](https://github.com/pav2000/MiniTFT_ST7789)**.
+> Download/clone it into `Arduino/libraries/MiniTFT` before that specific
 > example will compile. Every other example uses only the libraries already
 > present in `soft/lib/`.
 
@@ -119,8 +120,9 @@ Additional breakouts: full analog pin header (A0–A5), power header
 
 > **Важно:** финальный диагностический скетч (`soft/examples/19_ArduinoLab_Diagnostics`)
 > написан с использованием собственной библиотеки экрана `MiniTFT`
-> (`#include <MiniTFT.h>`), которой **пока нет в этом репозитории** — её нужно
-> добавить отдельно (как папку `Arduino/libraries/MiniTFT`), прежде чем именно
+> (`#include <MiniTFT.h>`), которой **нет в этом репозитории** — она лежит в
+> отдельном репозитории: **[pav2000/MiniTFT_ST7789](https://github.com/pav2000/MiniTFT_ST7789)**.
+> Скачайте/склонируйте её в `Arduino/libraries/MiniTFT`, прежде чем именно
 > этот пример соберётся. Все остальные примеры используют только библиотеки,
 > уже лежащие в `soft/lib/`.
 

@@ -18,7 +18,9 @@ third-party libraries needed to compile them.
 
 > The final example, **`19_ArduinoLab_Diagnostics`**, additionally requires a
 > custom `MiniTFT` display library (`#include <MiniTFT.h>`) that is **not**
-> included in `lib/` yet — see the note in the repository root `README.md`.
+> included in `lib/` — it lives in its own repository:
+> **[pav2000/MiniTFT_ST7789](https://github.com/pav2000/MiniTFT_ST7789)**.
+> Download/clone it into `Arduino/libraries/MiniTFT` before building this example.
 
 ## Examples
 
@@ -42,7 +44,7 @@ third-party libraries needed to compile them.
 | 16 | `16_MPU6050_raw` | Raw accelerometer/gyroscope data from an **external** MPU6050 module (connect via the board's spare I2C header) using the ElectronicCats MPU6050 library. |
 | 17 | `17_MPU6050_Zero` | MPU6050 offset calibration ("IMU Zero") — computes accelerometer/gyroscope bias so the external module reads correctly at rest. |
 | 18 | `18_Tenzo` | Load-cell weighing example: an **external** HX711 amplifier + load cell, plus the on-board DHT11 and TFT display. |
-| 19 | `19_ArduinoLab_Diagnostics` | **The full diagnostic firmware.** An on-screen menu (Up/OK/Down buttons) with a selectable, live-updating test for every on-board device, an I2C bus scanner, and free-RAM/firmware-version display at startup. Requires the separate `MiniTFT` library — see note above. |
+| 19 | `19_ArduinoLab_Diagnostics` | **The full diagnostic firmware.** An on-screen menu (Up/OK/Down buttons) with a selectable, live-updating test for every on-board device, an I2C bus scanner, and free-RAM/firmware-version display at startup. Requires the separate [`MiniTFT`](https://github.com/pav2000/MiniTFT_ST7789) library — see note above. |
 
 ## Libraries (`lib/`)
 
@@ -80,7 +82,9 @@ third-party libraries needed to compile them.
 
 > Последний пример, **`19_ArduinoLab_Diagnostics`**, дополнительно требует
 > собственную библиотеку экрана `MiniTFT` (`#include <MiniTFT.h>`), которой
-> **пока нет** в `lib/` — см. примечание в корневом `README.md` репозитория.
+> **нет** в `lib/` — она лежит в отдельном репозитории:
+> **[pav2000/MiniTFT_ST7789](https://github.com/pav2000/MiniTFT_ST7789)**.
+> Скачайте/склонируйте её в `Arduino/libraries/MiniTFT` перед сборкой этого примера.
 
 ## Примеры
 
@@ -104,7 +108,7 @@ third-party libraries needed to compile them.
 | 16 | `16_MPU6050_raw` | Сырые данные акселерометра/гироскопа с **внешнего** модуля MPU6050 (подключается через запасной разъём I2C платы), библиотека ElectronicCats MPU6050. |
 | 17 | `17_MPU6050_Zero` | Калибровка смещений MPU6050 ("IMU Zero") — вычисляет смещения акселерометра/гироскопа, чтобы внешний модуль корректно показывал ноль в состоянии покоя. |
 | 18 | `18_Tenzo` | Пример взвешивания на тензодатчике: **внешний** усилитель HX711 + тензодатчик, плюс установленные на плате DHT11 и экран. |
-| 19 | `19_ArduinoLab_Diagnostics` | **Полная диагностическая прошивка.** Меню на экране (кнопки Up/OK/Down) с выбираемым, обновляющимся «вживую» тестом для каждого устройства платы, сканер шины I2C, вывод свободной RAM/версии прошивки при старте. Требует отдельную библиотеку `MiniTFT` — см. примечание выше. |
+| 19 | `19_ArduinoLab_Diagnostics` | **Полная диагностическая прошивка.** Меню на экране (кнопки Up/OK/Down) с выбираемым, обновляющимся «вживую» тестом для каждого устройства платы, сканер шины I2C, вывод свободной RAM/версии прошивки при старте. Требует отдельную библиотеку [`MiniTFT`](https://github.com/pav2000/MiniTFT_ST7789) — см. примечание выше. |
 
 ## Библиотеки (`lib/`)
 
